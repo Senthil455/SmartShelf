@@ -170,3 +170,90 @@ function initSchema() {
 
   seedInitialData();
 }
+
+function seedInitialData() {
+  const storeCount = db.prepare('SELECT COUNT(*) as count FROM stores').get().count;
+  if (storeCount > 0) return;
+
+  console.log('Seeding initial production data for SmartShelf...');
+
+  // 1. Insert Demo Store
+  const insertStore = db.prepare(`
+    INSERT INTO stores (name, owner_name, phone, email, address, gstin, upi_id, currency, plan)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const storeResult = insertStore.run(
+    'Lakshmi Supermarket & Provisions',
+    'Ramesh Kumar & Sathish',
+    '+91 98765 43210',
+    'owner@smartshelf.local',
+    'No. 42, Gandhi Road, T. Nagar, Chennai - 600017',
+    '33AAAAA0000A1Z5',
+    'smartshelf@upi',
+    '₹',
+    'premium'
+  );
+  const storeId = storeResult.lastInsertRowid;
+
+  // 2. Insert Default User
+  db.prepare(`
+    INSERT INTO users (store_id, name, email, password, role)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(storeId, 'Ramesh Kumar (Store Owner)', 'admin@smartshelf.com', 'admin123', 'owner');
+
+  db.prepare(`
+    INSERT INTO users (store_id, name, email, password, role)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(storeId, 'Sathish (Cashier)', 'cashier@smartshelf.com', 'cashier123', 'cashier');
+
+  // 3. Insert Realistic Products (with Indian groceries, barcodes, units, and dates relative to now)
+  const today = new Date();
+  const addDays = (days) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + days);
+    return d.toISOString().split('T')[0];
+  };
+
+  const productsData = [
+    // Grains & Essentials
+    { name: 'Aashirvaad Shudh Chakki Atta (5kg)', local_name: 'ஆசீர்வாத் கோதுமை மாவு 5கிலோ', barcode: '8901030383854', category: 'Grains & Flours', unit: 'packet', purchase_price: 240, selling_price: 295, stock_quantity: 42, min_stock_alert: 10, expiry_date: addDays(180), batch: 'BATCH-ATT-09' },
+    { name: 'India Gate Basmati Rice Feast (1kg)', local_name: 'பாசுமதி அரிசி 1கிலோ', barcode: '8901725181145', category: 'Grains & Flours', unit: 'packet', purchase_price: 110, selling_price: 145, stock_quantity: 28, min_stock_alert: 8, expiry_date: addDays(250), batch: 'BATCH-RIC-01' },
+    { name: 'Tata Salt Vacuum Evaporated (1kg)', local_name: 'டாடா உப்பு 1கிலோ', barcode: '8901030005176', category: 'Grains & Flours', unit: 'packet', purchase_price: 22, selling_price: 28, stock_quantity: 85, min_stock_alert: 20, expiry_date: addDays(360), batch: 'BATCH-SLT-44' },
+    { name: 'Toor Dal Premium Unpolished (1kg)', local_name: 'துவரம் பருப்பு 1கிலோ', barcode: '8901234567890', category: 'Grains & Flours', unit: 'kg', purchase_price: 135, selling_price: 168, stock_quantity: 12, min_stock_alert: 15, expiry_date: addDays(120), batch: 'BATCH-DAL-12' },
+    { name: 'Fortune Sunlite Refined Sunflower Oil (1L)', local_name: 'சூரியகாந்தி எண்ணெய் 1லிட்டர்', barcode: '8906007281024', category: 'Oil & Ghee', unit: 'packet', purchase_price: 128, selling_price: 152, stock_quantity: 36, min_stock_alert: 10, expiry_date: addDays(190), batch: 'BATCH-OIL-88' },
+    { name: 'GRB Pure Ghee Jar (200ml)', local_name: 'ஜி.ஆர்.பி சுத்தமான நெய் 200மி.லி', barcode: '8906014410110', category: 'Oil & Ghee', unit: 'jar', purchase_price: 145, selling_price: 175, stock_quantity: 18, min_stock_alert: 5, expiry_date: addDays(150), batch: 'BATCH-GHEE-05' },
+
+    // Dairy & Fresh Items (Items with urgent expiry to test alerts)
+    { name: 'Aavin Green Magic Milk (500ml)', local_name: 'ஆவின் பால் 500மி.லி', barcode: '8908001001011', category: 'Dairy & Fresh', unit: 'packet', purchase_price: 21, selling_price: 24, stock_quantity: 45, min_stock_alert: 15, expiry_date: addDays(2), batch: 'AV-DAIRY-01' },
+    { name: 'Amul Salted Butter (100g)', local_name: 'அமுல் வெண்ணெய் 100கி', barcode: '8901262010052', category: 'Dairy & Fresh', unit: 'pcs', purchase_price: 50, selling_price: 58, stock_quantity: 4, min_stock_alert: 8, expiry_date: addDays(6), batch: 'AM-BUT-33' },
+    { name: 'Milky Mist Paneer (200g)', local_name: 'மில்கி மிஸ்ட் பனீர் 200கி', barcode: '8906017840013', category: 'Dairy & Fresh', unit: 'packet', purchase_price: 92, selling_price: 115, stock_quantity: 9, min_stock_alert: 10, expiry_date: addDays(4), batch: 'MM-PAN-19' },
+    { name: 'Modern Family Bread (400g)', local_name: 'மாடர்ன் ரொட்டி 400கி', barcode: '8901512001014', category: 'Bakery', unit: 'pcs', purchase_price: 36, selling_price: 45, stock_quantity: 14, min_stock_alert: 5, expiry_date: addDays(3), batch: 'MOD-BRD-81' },
+    { name: 'Curd Farm Fresh Pouch (500g)', local_name: 'பண்ணை புதிய தயிர் 500கி', barcode: '8901512999011', category: 'Dairy & Fresh', unit: 'packet', purchase_price: 30, selling_price: 36, stock_quantity: 3, min_stock_alert: 10, expiry_date: addDays(1), batch: 'CRD-EXP-02' },
+
+    // Snacks, Biscuits & Chocolates
+    { name: 'Parle-G Gold Glucose Biscuits (1kg)', local_name: 'பார்லே-ஜி பிஸ்கட் 1கிலோ', barcode: '8901719101012', category: 'Snacks & Biscuits', unit: 'packet', purchase_price: 88, selling_price: 110, stock_quantity: 32, min_stock_alert: 10, expiry_date: addDays(210), batch: 'PG-GLD-72' },
+    { name: 'Britannia Good Day Cashew Cookies (200g)', local_name: 'பிரிட்டானியா குட் டே 200கி', barcode: '8901063012011', category: 'Snacks & Biscuits', unit: 'packet', purchase_price: 38, selling_price: 50, stock_quantity: 48, min_stock_alert: 12, expiry_date: addDays(180), batch: 'BRI-GD-10' },
+    { name: 'Maggi 2-Minute Masala Noodles (Pack of 4)', local_name: 'மேகி 2 நிமிட நூடுல்ஸ் 4-பேக்', barcode: '8901058863413', category: 'Snacks & Biscuits', unit: 'packet', purchase_price: 51, selling_price: 60, stock_quantity: 50, min_stock_alert: 15, expiry_date: addDays(150), batch: 'MAG-NDL-44' },
+    { name: 'Cadbury Dairy Milk Silk Chocolate (60g)', local_name: 'கேட்பரி சில்க் சாக்லேட் 60கி', barcode: '7622201440014', category: 'Snacks & Biscuits', unit: 'pcs', purchase_price: 70, selling_price: 85, stock_quantity: 6, min_stock_alert: 12, expiry_date: addDays(90), batch: 'CAD-SLK-12' },
+    { name: 'Lays Classic Salted Potato Chips (50g)', local_name: 'லேஸ் உருளைக்கிழங்கு சிப்ஸ்', barcode: '8901491101015', category: 'Snacks & Biscuits', unit: 'packet', purchase_price: 16, selling_price: 20, stock_quantity: 35, min_stock_alert: 15, expiry_date: addDays(75), batch: 'LAY-SLT-99' },
+
+    // Beverages & Tea/Coffee
+    { name: 'AVT Premium Dust Tea (500g)', local_name: 'ஏவிடி தேயிலை தூள் 500கி', barcode: '8901138801021', category: 'Beverages', unit: 'packet', purchase_price: 165, selling_price: 198, stock_quantity: 24, min_stock_alert: 8, expiry_date: addDays(300), batch: 'AVT-TEA-03' },
+    { name: 'Bru Instant Coffee Powder Pouch (100g)', local_name: 'ப்ரூ உடனடி காபி தூள் 100கி', barcode: '8901030701023', category: 'Beverages', unit: 'packet', purchase_price: 140, selling_price: 165, stock_quantity: 19, min_stock_alert: 6, expiry_date: addDays(270), batch: 'BRU-COF-51' },
+    { name: 'Horlicks Classic Malt Jar (500g)', local_name: 'ஹார்லிக்ஸ் மால்ட் ஜார் 500கி', barcode: '8901571001018', category: 'Beverages', unit: 'jar', purchase_price: 240, selling_price: 285, stock_quantity: 11, min_stock_alert: 5, expiry_date: addDays(240), batch: 'HOR-MLT-22' },
+
+    // Personal & Home Care
+    { name: 'Dettol Original Germ Protection Soap (125g)', local_name: 'டெட்டால் அசல் சோப் 125கி', barcode: '8901396101017', category: 'Personal & Home Care', unit: 'pcs', purchase_price: 44, selling_price: 55, stock_quantity: 40, min_stock_alert: 12, expiry_date: addDays(400), batch: 'DET-SOP-77' },
+    { name: 'Surf Excel Quick Wash Detergent Powder (1kg)', local_name: 'சர்ப் எக்செல் துவைக்கும் பொடி 1கிலோ', barcode: '8901030612015', category: 'Personal & Home Care', unit: 'packet', purchase_price: 142, selling_price: 165, stock_quantity: 22, min_stock_alert: 8, expiry_date: addDays(450), batch: 'SRF-EXC-41' },
+    { name: 'Vim Dishwash Gel Lemon (500ml)', local_name: 'விம் பாத்திரம் கழுவும் ஜெல் 500மி.லி', barcode: '8901030501012', category: 'Personal & Home Care', unit: 'bottle', purchase_price: 105, selling_price: 125, stock_quantity: 2, min_stock_alert: 8, expiry_date: addDays(350), batch: 'VIM-GEL-18' }
+  ];
+
+  const insertProduct = db.prepare(`
+    INSERT INTO products (store_id, name, local_name, barcode, category, unit, purchase_price, selling_price, stock_quantity, min_stock_alert, expiry_date, batch_number)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  productsData.forEach(p => {
+    insertProduct.run(storeId, p.name, p.local_name, p.barcode, p.category, p.unit, p.purchase_price, p.selling_price, p.stock_quantity, p.min_stock_alert, p.expiry_date, p.batch);
+  });
+
