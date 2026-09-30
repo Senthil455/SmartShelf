@@ -196,3 +196,146 @@ router.get('/products/categories', (req, res) => {
   }
 });
 
+// --- BILLING & POS SALES ENDPOINTS ---
+
+router.post('/sales', (req, res) => {
+  const transaction = db.transaction((saleData) => {
+    const {
+      customerId,
+      customerName,
+      customerPhone,
+      items,
+      subtotal,
+      taxAmount,
+      discountAmount,
+      totalAmount,
+      paymentMode,
+      cashReceived,
+      changeReturned,
+      notes
+    } = saleData;
+
+    // Generate unique invoice number
+    const count = db.prepare('SELECT COUNT(*) as count FROM sales').get().count;
+    const invoiceNumber = `INV-${new Date().getFullYear()}-${String(count + 1).padStart(4, '0')}`;
+
+    // Payment status
+    const paymentStatus = paymentMode === 'due' ? 'pending' : 'paid';
+
+    // Insert sale
+    const saleResult = db.prepare(`
+      INSERT INTO sales (store_id, invoice_number, customer_id, customer_name, customer_phone, subtotal, tax_amount, discount_amount, total_amount, payment_mode, payment_status, cash_received, change_returned, notes)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      invoiceNumber,
+      customerId || null,
+      customerName || 'Walk-in Customer',
+      customerPhone || '',
+      Number(subtotal),
+      Number(taxAmount || 0),
+      Number(discountAmount || 0),
+      Number(totalAmount),
+      paymentMode,
+      paymentStatus,
+      Number(cashReceived || totalAmount),
+      Number(changeReturned || 0),
+      notes || ''
+    );
+
+    const saleId = saleResult.lastInsertRowid;
+
+    // Insert sale items & deduct product inventory
+    const insertItem = db.prepare(`
+      INSERT INTO sale_items (sale_id, product_id, product_name, unit, quantity, unit_price, purchase_price, total_price, profit)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const updateStock = db.prepare(`
+      UPDATE products
+      SET stock_quantity = stock_quantity - ?
+      WHERE id = ?
+    `);
+
+    items.forEach(item => {
+      const profit = (Number(item.price) - Number(item.purchase_price || 0)) * Number(item.quantity);
+      insertItem.run(
+        saleId,
+        item.id,
+        item.name,
+        item.unit || 'pcs',
+        Number(item.quantity),
+        Number(item.price),
+        Number(item.purchase_price || 0),
+        Number(item.price) * Number(item.quantity),
+        profit
+      );
+
+      if (item.id) {
+        updateStock.run(Number(item.quantity), item.id);
+      }
+    });
+
+    // Update customer stats if customer selected
+    if (customerId) {
+      if (paymentMode === 'due') {
+        db.prepare(`
+          UPDATE customers 
+          SET total_purchases = total_purchases + ?, credit_due = credit_due + ?
+          WHERE id = ?
+        `).run(Number(totalAmount), Number(totalAmount), customerId);
+      } else {
+        db.prepare(`
+          UPDATE customers 
+          SET total_purchases = total_purchases + ?
+          WHERE id = ?
+        `).run(Number(totalAmount), customerId);
+      }
+    }
+
+    return { saleId, invoiceNumber };
+  });
+
+  try {
+    const result = transaction(req.body);
+    const fullSale = db.prepare('SELECT * FROM sales WHERE id = ?').get(result.saleId);
+    const saleItems = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(result.saleId);
+
+    res.json({
+      success: true,
+      message: 'Sale completed successfully',
+      sale: { ...fullSale, items: saleItems }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.get('/sales', (req, res) => {
+  try {
+    const sales = db.prepare(`
+      SELECT s.*, 
+        (SELECT COUNT(*) FROM sale_items WHERE sale_id = s.id) as item_count 
+      FROM sales s 
+      WHERE store_id = 1 
+      ORDER BY s.id DESC 
+      LIMIT 100
+    `).all();
+
+    res.json({ success: true, sales });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.get('/sales/:id', (req, res) => {
+  try {
+    const sale = db.prepare('SELECT * FROM sales WHERE id = ?').get(req.params.id);
+    if (!sale) return res.status(404).json({ success: false, message: 'Sale not found' });
+
+    const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(sale.id);
+    res.json({ success: true, sale: { ...sale, items } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
