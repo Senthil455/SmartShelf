@@ -535,3 +535,206 @@ router.delete('/expenses/:id', (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
+// --- LOW STOCK & EXPIRY ALERTS ENDPOINTS ---
+
+router.get('/alerts', (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const in7Days = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+    const in30Days = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+
+    // Low stock products
+    const lowStock = db.prepare(`
+      SELECT * FROM products 
+      WHERE store_id = 1 AND stock_quantity <= min_stock_alert
+      ORDER BY stock_quantity ASC
+    `).all();
+
+    // Expired products
+    const expired = db.prepare(`
+      SELECT * FROM products
+      WHERE store_id = 1 AND expiry_date IS NOT NULL AND expiry_date < ?
+      ORDER BY expiry_date ASC
+    `).all(today);
+
+    // Expiring within 7 days
+    const expiringIn7 = db.prepare(`
+      SELECT * FROM products
+      WHERE store_id = 1 AND expiry_date IS NOT NULL AND expiry_date >= ? AND expiry_date <= ?
+      ORDER BY expiry_date ASC
+    `).all(today, in7Days);
+
+    // Expiring within 30 days
+    const expiringIn30 = db.prepare(`
+      SELECT * FROM products
+      WHERE store_id = 1 AND expiry_date IS NOT NULL AND expiry_date > ? AND expiry_date <= ?
+      ORDER BY expiry_date ASC
+    `).all(in7Days, in30Days);
+
+    res.json({
+      success: true,
+      counts: {
+        lowStock: lowStock.length,
+        expired: expired.length,
+        expiringIn7: expiringIn7.length,
+        expiringIn30: expiringIn30.length,
+        totalAlerts: lowStock.length + expired.length + expiringIn7.length
+      },
+      lowStock,
+      expired,
+      expiringIn7,
+      expiringIn30
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// --- ANALYTICS & REPORTS COCKPIT ---
+
+router.get('/reports/summary', (req, res) => {
+  try {
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Today's Sales
+    const todaySales = db.prepare(`
+      SELECT COALESCE(SUM(total_amount), 0) as total, COUNT(*) as count 
+      FROM sales 
+      WHERE store_id = 1 AND DATE(created_at) = DATE(?)
+    `).get(todayStr);
+
+    // Total Revenue (All Time)
+    const allSales = db.prepare('SELECT COALESCE(SUM(total_amount), 0) as total, COUNT(*) as count FROM sales WHERE store_id = 1').get();
+
+    // Gross Profit (Total Price - Cost)
+    const grossProfit = db.prepare(`
+      SELECT COALESCE(SUM(profit), 0) as profit 
+      FROM sale_items si 
+      JOIN sales s ON si.sale_id = s.id 
+      WHERE s.store_id = 1
+    `).get();
+
+    // Total Expenses
+    const totalExpenses = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE store_id = 1').get();
+
+    // Total Customer Credit / Udhaar Due
+    const totalDue = db.prepare('SELECT COALESCE(SUM(credit_due), 0) as total, COUNT(*) as count FROM customers WHERE store_id = 1 AND credit_due > 0').get();
+
+    // Total Products & Inventory Value
+    const inventory = db.prepare(`
+      SELECT 
+        COUNT(*) as total_items,
+        COALESCE(SUM(stock_quantity * purchase_price), 0) as total_inventory_cost,
+        COALESCE(SUM(stock_quantity * selling_price), 0) as total_inventory_value
+      FROM products WHERE store_id = 1
+    `).get();
+
+    // Urgent Alerts count
+    const alerts = db.prepare(`
+      SELECT 
+        (SELECT COUNT(*) FROM products WHERE store_id = 1 AND stock_quantity <= min_stock_alert) as low_stock_count,
+        (SELECT COUNT(*) FROM products WHERE store_id = 1 AND expiry_date <= DATE('now', '+7 days')) as expiring_count
+    `).get();
+
+    res.json({
+      success: true,
+      summary: {
+        todaySales: todaySales.total,
+        todayOrders: todaySales.count,
+        allSales: allSales.total,
+        allOrders: allSales.count,
+        grossProfit: grossProfit.profit,
+        totalExpenses: totalExpenses.total,
+        netProfit: grossProfit.profit - totalExpenses.total,
+        totalDuePending: totalDue.total,
+        dueCustomersCount: totalDue.count,
+        totalProducts: inventory.total_items,
+        inventoryCost: inventory.total_inventory_cost,
+        inventoryValue: inventory.total_inventory_value,
+        lowStockCount: alerts.low_stock_count,
+        expiringCount: alerts.expiring_count
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Chart data: 7-day sales trend
+router.get('/reports/sales-chart', (req, res) => {
+  try {
+    const salesByDay = db.prepare(`
+      SELECT 
+        DATE(created_at) as date,
+        COALESCE(SUM(total_amount), 0) as revenue,
+        COUNT(*) as orders
+      FROM sales
+      WHERE store_id = 1 AND created_at >= DATE('now', '-7 days')
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+    `).all();
+
+    // Fill missing days if needed
+    const result = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const match = salesByDay.find(item => item.date === dateStr);
+      result.push({
+        date: new Date(dateStr).toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric' }),
+        revenue: match ? match.revenue : 0,
+        orders: match ? match.orders : 0
+      });
+    }
+
+    res.json({ success: true, chartData: result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Top Selling Products
+router.get('/reports/top-products', (req, res) => {
+  try {
+    const topProducts = db.prepare(`
+      SELECT 
+        product_name,
+        SUM(quantity) as total_sold,
+        SUM(total_price) as total_revenue,
+        SUM(profit) as total_profit
+      FROM sale_items si
+      JOIN sales s ON si.sale_id = s.id
+      WHERE s.store_id = 1
+      GROUP BY product_name
+      ORDER BY total_sold DESC
+      LIMIT 6
+    `).all();
+
+    res.json({ success: true, topProducts });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Payment method breakdown
+router.get('/reports/payment-breakdown', (req, res) => {
+  try {
+    const modes = db.prepare(`
+      SELECT 
+        payment_mode,
+        COALESCE(SUM(total_amount), 0) as amount,
+        COUNT(*) as count
+      FROM sales
+      WHERE store_id = 1
+      GROUP BY payment_mode
+    `).all();
+
+    res.json({ success: true, modes });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+module.exports = router;
