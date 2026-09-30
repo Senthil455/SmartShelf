@@ -257,3 +257,99 @@ function seedInitialData() {
     insertProduct.run(storeId, p.name, p.local_name, p.barcode, p.category, p.unit, p.purchase_price, p.selling_price, p.stock_quantity, p.min_stock_alert, p.expiry_date, p.batch);
   });
 
+  // 4. Insert Customers with Khata (Udhaar) Balances
+  const insertCustomer = db.prepare(`
+    INSERT INTO customers (store_id, name, phone, address, total_purchases, credit_due)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  const cust1 = insertCustomer.run(storeId, 'Ravi Kumar (Teacher)', '+91 98765 43210', 'Block 4, Flat 12, T. Nagar', 7450, 650);
+  const cust2 = insertCustomer.run(storeId, 'Sunita Devi', '+91 91234 56780', '14, Cross Street, Postal Colony', 1870, 0);
+  const cust3 = insertCustomer.run(storeId, 'Amit Verma (Driver)', '+91 99887 76655', '3/10, MGR Nagar 2nd Street', 3620, 1200);
+  const cust4 = insertCustomer.run(storeId, 'Neha Sharma', '+91 90900 00090', '52, North Usman Road', 1280, 0);
+  const cust5 = insertCustomer.run(storeId, 'Anil Kumar (Electrician)', '+91 98401 23456', '8, South Boag Road', 2150, 350);
+
+  // 5. Insert Suppliers
+  const insertSupplier = db.prepare(`
+    INSERT INTO suppliers (store_id, name, contact_person, phone, address, total_purchases, balance_due)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  insertSupplier.run(storeId, 'Metro Wholesale Traders', 'Gowtham Raj', '+91 94440 12345', 'Koyambedu Wholesale Market, Chennai', 45200, 8500);
+  insertSupplier.run(storeId, 'Aavin Milk Distribution Hub', 'Murugan S.', '+91 98410 98765', 'Anna Salai Dairy Depot', 18200, 1200);
+  insertSupplier.run(storeId, 'HUL Direct Retail Agency', 'Praveen Nair', '+91 97900 45678', 'Guindy Industrial Estate', 32000, 0);
+
+  // 6. Insert Recent Sales (spanning the last few days to populate dashboards & charts)
+  const insertSale = db.prepare(`
+    INSERT INTO sales (store_id, invoice_number, customer_id, customer_name, customer_phone, subtotal, tax_amount, discount_amount, total_amount, payment_mode, payment_status, cash_received, change_returned, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertSaleItem = db.prepare(`
+    INSERT INTO sale_items (sale_id, product_id, product_name, unit, quantity, unit_price, purchase_price, total_price, profit)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  // Sample historical sales for analytics
+  const pastDates = [
+    { daysAgo: 6, inv: 'INV-2026-001', cust: 'Walk-in Customer', phone: '', sub: 840, tax: 25, disc: 0, tot: 865, mode: 'cash' },
+    { daysAgo: 5, inv: 'INV-2026-002', cust: 'Ravi Kumar (Teacher)', phone: '+91 98765 43210', sub: 1250, tax: 35, disc: 35, tot: 1250, mode: 'due' },
+    { daysAgo: 4, inv: 'INV-2026-003', cust: 'Walk-in Customer', phone: '', sub: 620, tax: 18, disc: 0, tot: 638, mode: 'upi' },
+    { daysAgo: 3, inv: 'INV-2026-004', cust: 'Sunita Devi', phone: '+91 91234 56780', sub: 1870, tax: 55, disc: 25, tot: 1900, mode: 'cash' },
+    { daysAgo: 2, inv: 'INV-2026-005', cust: 'Amit Verma (Driver)', phone: '+91 99887 76655', sub: 980, tax: 28, disc: 0, tot: 1008, mode: 'upi' },
+    { daysAgo: 1, inv: 'INV-2026-006', cust: 'Walk-in Customer', phone: '', sub: 2150, tax: 65, disc: 50, tot: 2165, mode: 'cash' },
+    { daysAgo: 0, inv: 'INV-2026-007', cust: 'Neha Sharma', phone: '+91 90900 00090', sub: 1280, tax: 38, disc: 18, tot: 1300, mode: 'upi' },
+    { daysAgo: 0, inv: 'INV-2026-008', cust: 'Walk-in Customer', phone: '', sub: 460, tax: 12, disc: 0, tot: 472, mode: 'cash' }
+  ];
+
+  pastDates.forEach((s) => {
+    const saleDate = new Date(today);
+    saleDate.setDate(saleDate.getDate() - s.daysAgo);
+    saleDate.setHours(10 + Math.floor(Math.random() * 8), Math.floor(Math.random() * 59));
+    const dateStr = saleDate.toISOString().replace('T', ' ').substring(0, 19);
+
+    const res = insertSale.run(
+      storeId,
+      s.inv,
+      s.cust.includes('Ravi') ? cust1.lastInsertRowid : s.cust.includes('Sunita') ? cust2.lastInsertRowid : null,
+      s.cust,
+      s.phone,
+      s.sub,
+      s.tax,
+      s.disc,
+      s.tot,
+      s.mode,
+      s.mode === 'due' ? 'pending' : 'paid',
+      s.tot,
+      0,
+      dateStr
+    );
+
+    // Add sample items
+    insertSaleItem.run(res.lastInsertRowid, 1, 'Aashirvaad Shudh Chakki Atta (5kg)', 'packet', 1, 295, 240, 295, 55);
+    insertSaleItem.run(res.lastInsertRowid, 7, 'Aavin Green Magic Milk (500ml)', 'packet', 2, 24, 21, 48, 6);
+    insertSaleItem.run(res.lastInsertRowid, 3, 'Tata Salt Vacuum Evaporated (1kg)', 'packet', 1, 28, 22, 28, 6);
+  });
+
+  // 7. Insert Store Expenses
+  const insertExpense = db.prepare(`
+    INSERT INTO expenses (store_id, category, description, amount, payment_mode, date)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  insertExpense.run(storeId, 'Rent', 'Monthly Shop Front Rent', 12000, 'bank_transfer', addDays(-10));
+  insertExpense.run(storeId, 'Electricity', 'TNEB Commercial Power Bill', 3200, 'upi', addDays(-5));
+  insertExpense.run(storeId, 'Tea & Snacks', 'Daily tea for staff and delivery boys', 350, 'cash', addDays(0));
+  insertExpense.run(storeId, 'Packaging', 'Biodegradable carry bags and paper pouches', 950, 'cash', addDays(-2));
+  insertExpense.run(storeId, 'Staff Salary', 'Part-time assistant wage advance', 4000, 'cash', addDays(-3));
+
+  // 8. Log Initial Activity
+  db.prepare(`
+    INSERT INTO audit_logs (store_id, action, user, details)
+    VALUES (?, ?, ?, ?)
+  `).run(storeId, 'STORE_SETUP', 'System', 'SmartShelf production environment initialized with demo store and catalog');
+
+  console.log('Production database initialized successfully.');
+}
+
+initSchema();
+
+module.exports = db;
