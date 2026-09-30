@@ -339,3 +339,199 @@ router.get('/sales/:id', (req, res) => {
   }
 });
 
+// --- CUSTOMERS & KHATA (UDHAAR) ENDPOINTS ---
+
+router.get('/customers', (req, res) => {
+  try {
+    const customers = db.prepare('SELECT * FROM customers WHERE store_id = 1 ORDER BY credit_due DESC, total_purchases DESC').all();
+    res.json({ success: true, customers });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/customers', (req, res) => {
+  try {
+    const { name, phone, address, credit_due } = req.body;
+    const result = db.prepare(`
+      INSERT INTO customers (store_id, name, phone, address, credit_due)
+      VALUES (1, ?, ?, ?, ?)
+    `).run(name, phone || '', address || '', Number(credit_due || 0));
+
+    const newCust = db.prepare('SELECT * FROM customers WHERE id = ?').get(result.lastInsertRowid);
+    res.json({ success: true, customer: newCust });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.put('/customers/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, phone, address, credit_due } = req.body;
+    db.prepare(`
+      UPDATE customers
+      SET name = ?, phone = ?, address = ?, credit_due = ?
+      WHERE id = ? AND store_id = 1
+    `).run(name, phone, address, Number(credit_due || 0), id);
+
+    const updated = db.prepare('SELECT * FROM customers WHERE id = ?').get(id);
+    res.json({ success: true, customer: updated });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/customers/:id/pay-due', (req, res) => {
+  const transaction = db.transaction(({ customerId, amount, paymentMode, notes }) => {
+    const payAmt = Number(amount);
+    db.prepare(`
+      INSERT INTO customer_payments (store_id, customer_id, amount, payment_mode, notes)
+      VALUES (1, ?, ?, ?, ?)
+    `).run(customerId, payAmt, paymentMode || 'cash', notes || 'Khata Payment');
+
+    db.prepare(`
+      UPDATE customers
+      SET credit_due = MAX(0, credit_due - ?)
+      WHERE id = ?
+    `).run(payAmt, customerId);
+
+    return db.prepare('SELECT * FROM customers WHERE id = ?').get(customerId);
+  });
+
+  try {
+    const updated = transaction({
+      customerId: req.params.id,
+      amount: req.body.amount,
+      paymentMode: req.body.paymentMode,
+      notes: req.body.notes
+    });
+    res.json({ success: true, message: 'Payment recorded successfully', customer: updated });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// --- SUPPLIERS & PURCHASE ORDERS ENDPOINTS ---
+
+router.get('/suppliers', (req, res) => {
+  try {
+    const suppliers = db.prepare('SELECT * FROM suppliers WHERE store_id = 1 ORDER BY id DESC').all();
+    res.json({ success: true, suppliers });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/suppliers', (req, res) => {
+  try {
+    const { name, contact_person, phone, address, balance_due } = req.body;
+    const result = db.prepare(`
+      INSERT INTO suppliers (store_id, name, contact_person, phone, address, balance_due)
+      VALUES (1, ?, ?, ?, ?, ?)
+    `).run(name, contact_person || '', phone || '', address || '', Number(balance_due || 0));
+
+    const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(result.lastInsertRowid);
+    res.json({ success: true, supplier });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/suppliers/purchases', (req, res) => {
+  const transaction = (purchaseData) => {
+    const { supplierId, supplierName, billNumber, totalAmount, amountPaid, items, notes } = purchaseData;
+    const balance = Number(totalAmount) - Number(amountPaid || 0);
+
+    const purchaseRes = db.prepare(`
+      INSERT INTO purchases (store_id, supplier_id, supplier_name, bill_number, total_amount, amount_paid, status, notes)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      supplierId || null,
+      supplierName,
+      billNumber || `PUR-${Date.now().toString().slice(-5)}`,
+      Number(totalAmount),
+      Number(amountPaid || 0),
+      balance <= 0 ? 'paid' : 'due',
+      notes || ''
+    );
+
+    // If supplier selected, update supplier total purchases and balance due
+    if (supplierId) {
+      db.prepare(`
+        UPDATE suppliers
+        SET total_purchases = total_purchases + ?, balance_due = balance_due + ?
+        WHERE id = ?
+      `).run(Number(totalAmount), balance, supplierId);
+    }
+
+    // Increase product stock if items provided
+    if (items && Array.isArray(items)) {
+      const updateStock = db.prepare('UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?');
+      items.forEach(item => {
+        if (item.productId && item.quantity) {
+          updateStock.run(Number(item.quantity), item.productId);
+        }
+      });
+    }
+
+    return purchaseRes.lastInsertRowid;
+  };
+
+  try {
+    const purchaseId = db.transaction(transaction)(req.body);
+    res.json({ success: true, message: 'Purchase logged and stock updated', purchaseId });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.get('/suppliers/purchases', (req, res) => {
+  try {
+    const purchases = db.prepare('SELECT * FROM purchases WHERE store_id = 1 ORDER BY id DESC').all();
+    res.json({ success: true, purchases });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// --- EXPENSES ENDPOINTS ---
+
+router.get('/expenses', (req, res) => {
+  try {
+    const expenses = db.prepare('SELECT * FROM expenses WHERE store_id = 1 ORDER BY date DESC, id DESC').all();
+    res.json({ success: true, expenses });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/expenses', (req, res) => {
+  try {
+    const { category, description, amount, payment_mode, date } = req.body;
+    const result = db.prepare(`
+      INSERT INTO expenses (store_id, category, description, amount, payment_mode, date)
+      VALUES (1, ?, ?, ?, ?, ?)
+    `).run(
+      category || 'Other',
+      description || '',
+      Number(amount),
+      payment_mode || 'cash',
+      date || new Date().toISOString().split('T')[0]
+    );
+
+    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(result.lastInsertRowid);
+    res.json({ success: true, expense });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.delete('/expenses/:id', (req, res) => {
+  try {
+    db.prepare('DELETE FROM expenses WHERE id = ? AND store_id = 1').run(req.params.id);
+    res.json({ success: true, message: 'Expense deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
