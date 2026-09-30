@@ -30,11 +30,12 @@ if (fs.existsSync(clientDistPath)) {
   console.log(`Serving client production build from: ${clientDistPath}`);
   app.use(express.static(clientDistPath));
 
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api')) {
-      return next();
+  // SPA fallback middleware for HTML5 client-side routing
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      return res.sendFile(path.join(clientDistPath, 'index.html'));
     }
-    res.sendFile(path.join(clientDistPath, 'index.html'));
+    next();
   });
 }
 
@@ -50,8 +51,9 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`====================================================`);
-  console.log(`🛒 SmartShelf Production Backend Server Running!`);
-  console.log(`🚀 API Base URL: http://localhost:${PORT}/api`);
+  console.log(`🛒 SmartShelf Production Platform is LIVE!`);
+  console.log(`🌐 Website & App: http://localhost:${PORT}`);
+  console.log(`🚀 REST API Base: http://localhost:${PORT}/api`);
   console.log(`❤️  Health Check: http://localhost:${PORT}/api/health`);
   console.log(`====================================================`);
 });
