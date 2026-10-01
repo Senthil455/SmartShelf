@@ -1,21 +1,31 @@
 {
   "name": "smartshelf",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "SmartShelf - Inventory & Sales Management System for Local Kirana Stores",
+  "main": "server/src/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build:client": "npm --prefix client run build",
+    "build": "npm run build:client",
+    "server": "node server/src/index.js",
+    "start": "node server/src/index.js",
+    "dev:server": "node server/src/index.js",
+    "dev:client": "npm --prefix client run dev",
+    "dev": "node server/src/index.js"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Senthil455/SmartShelf.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/Senthil455/SmartShelf/issues"
-  },
-  "homepage": "https://github.com/Senthil455/SmartShelf#readme"
+  "keywords": [
+    "smartshelf",
+    "pos",
+    "kirana",
+    "retail",
+    "supermarket",
+    "inventory",
+    "billing",
+    "expiry-alerts"
+  ],
+  "author": "CEG Department of IST",
+  "license": "MIT"
 }
