@@ -1,14 +1,13 @@
 {
   "name": "server",
   "version": "1.0.0",
-  "description": "SmartShelf Express API and Static Server",
-  "main": "src/index.js",
+  "description": "",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node src/index.js"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "CEG IST",
+  "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
